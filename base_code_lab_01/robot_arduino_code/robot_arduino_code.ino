@@ -7,11 +7,11 @@
 #define NoSignalDeltaTimeInMs 2000 // Number ms between message receives from laptop before stopping robot
 char ssid[] = "TP-Link_7BD6";      // REPLACE with your team's router ssid
 char pass[] = "15124654";          // REPLACE with your team's router password
-char remoteIP[] = "192.168.0.192"; // REPLACE with your laptop's IP address on your team's router
+char remoteIP[] = "192.168.0.196"; // REPLACE with your laptop's IP address on your team's router
 unsigned int localPort = 4010;     // local port to listen on - no need to change
 unsigned int remotePort = 4010;    // local port to listen on - no need to change
 int status = WL_IDLE_STATUS;
-int last_time_rx = 0;
+int last_time_rx = 0; 
 int last_time_tx = 0;
 WiFiUDP Udp;
 char packetBuffer[256];            //buffer to hold incoming packet
@@ -158,11 +158,11 @@ void stop()
 // Drive robot forward a desired speed
 void forward(int speed)
 {
-  digitalWrite(RightMotorDirPin1, HIGH);
-  digitalWrite(RightMotorDirPin2,LOW);
+  digitalWrite(RightMotorDirPin1, LOW);
+  digitalWrite(RightMotorDirPin2,HIGH);
   digitalWrite(LeftMotorDirPin1,HIGH);
   digitalWrite(LeftMotorDirPin2,LOW);
-  analogWrite(LeftSpeedPin, speed * 0.75);
+  analogWrite(LeftSpeedPin, speed * 0.55);
   analogWrite(RightSpeedPin, speed);
 }
 
