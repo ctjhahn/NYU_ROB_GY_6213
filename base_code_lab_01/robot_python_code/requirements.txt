@@ -1,0 +1,11 @@
+opencv-python
+matplotlib
+nicegui
+numpy
+fastapi
+uvicorn
+serial
+matplotlib
+asyncio
+time
+pywebview
