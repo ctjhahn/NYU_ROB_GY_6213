@@ -12,6 +12,7 @@ from time import strftime
 # Local libraries
 import parameters
 
+
 # Function to try to connect to the robot via udp over wifi
 def create_udp_communication(arduinoIP, localIP, arduinoPort, localPort, bufferSize):
     try:
@@ -58,7 +59,6 @@ class DataLogger:
         self.filename_start = filename_start
         self.filename = filename_start
         self.line_count = 0
-        #self.file = open(filename, 'w')
         self.dictionary = {}
         self.data_name_list = data_name_list
         for name in data_name_list:
@@ -74,7 +74,7 @@ class DataLogger:
 
         
     # Log one time step of data
-    def log(self, logging_switch_on, time, control_signal, robot_sensor_signal, camera_sensor_signal):
+    def log(self, logging_switch_on, time, control_signal, robot_sensor_signal, camera_sensor_signal, state_mean, state_covariance):
         if not logging_switch_on:
             if self.currently_logging:
                 self.currently_logging = False
@@ -83,18 +83,20 @@ class DataLogger:
                 self.currently_logging = True
                 self.reset_logfile(control_signal)
 
-        self.dictionary['time'].append(time)
-        self.dictionary['control_signal'].append(control_signal)
-        self.dictionary['robot_sensor_signal'].append(robot_sensor_signal)
-        self.dictionary['camera_sensor_signal'].append(camera_sensor_signal)
+        if self.currently_logging:
+            self.dictionary['time'].append(time)
+            self.dictionary['control_signal'].append(control_signal)
+            self.dictionary['robot_sensor_signal'].append(robot_sensor_signal)
+            self.dictionary['camera_sensor_signal'].append(camera_sensor_signal)
+            self.dictionary['state_mean'].append(state_mean)
+            self.dictionary['state_covariance'].append(state_covariance)
 
-        self.line_count += 1
-        if self.line_count > parameters.max_num_lines_before_write:
-            self.line_count = 0
-            with open(self.filename, 'wb') as file_handle:
-                pickle.dump(self.dictionary, file_handle)
-            
-            
+            self.line_count += 1
+            if self.line_count > parameters.max_num_lines_before_write:
+                self.line_count = 0
+                with open(self.filename, 'wb') as file_handle:
+                    pickle.dump(self.dictionary, file_handle)
+
 # Utility for loading saved data
 class DataLoader:
 
@@ -107,50 +109,6 @@ class DataLoader:
         with open(self.filename, 'rb') as file_handle:
             loaded_dict = pickle.load(file_handle)
         return loaded_dict
-        
-        
-# Class to hold a camera sensor data. Not needed for lab 1.
-class CameraSensor:
-
-    # Constructor
-    def __init__(self, camera_id):
-        self.camera_id = camera_id
-        self.cap = cv2.VideoCapture(camera_id)
-        self.aruco_dict = aruco.getPredefinedDictionary(aruco.DICT_6X6_250)
-        self.parameters = aruco.DetectorParameters()
-        self.detector = aruco.ArucoDetector(self.aruco_dict, self.parameters)
-        
-    # Get a new pose estimate from a camera image
-    def get_signal(self, last_camera_signal):
-        camera_signal = last_camera_signal
-        ret, pose_estimate = self.get_pose_estimate()
-        if ret:
-            camera_signal = pose_estimate
-        
-        return camera_signal
-        
-    # If there is a new image, calculate a pose estimate from the fiducial tag on the robot.
-    def get_pose_estimate(self):
-        ret, frame = self.cap.read()
-        if not ret:
-            return False, []
-        
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        corners, ids, rejectedImgPoints = self.detector.detectMarkers(gray)
-        if ids is not None:
-            # Estimate pose for each detected marker
-            for i in range(len(ids)):
-                rvec, tvec, _ = aruco.estimatePoseSingleMarkers(corners[i], parameters.marker_length, camera_matrix, dist_coeffs)
-                pose_estimate = [tvec[0][0][0], tvec[0][0][1], tvec[0][0][2], rvec[0][0][0], rvec[0][0][1], rvec[0][0][2]]
-            return True, pose_estimate
-        
-        return False, []
-    
-    # Close the camera stream
-    def close(self):
-        self.cap.release()
-        cv2.destroyAllWindows()
-
 
 # Class to hold a message sender
 class MsgSender:
@@ -190,44 +148,6 @@ class MsgSender:
         packed_msg = packed_msg + "\n"
         return packed_msg
         
-        
-# A storage vessel for an instance of a robot signal
-class RobotSensorSignal:
-
-    # Constructor
-    def __init__(self, unpacked_msg):
-        self.encoder_counts = int(unpacked_msg[0])
-        self.steering = int(unpacked_msg[1])
-        self.num_lidar_rays = int(unpacked_msg[2])
-        self.angles = []
-        self.distances = []
-        for i in range(self.num_lidar_rays):
-            index = 3 + i*2
-            self.angles.append(unpacked_msg[index])
-            self.distances.append(unpacked_msg[index+1])
-    
-    # Print the robot sensor signal contents.
-    def print(self):
-        print("Robot Sensor Signal")
-        print(" encoder: ", self.encoder_counts)
-        print(" steering:" , self.steering)
-        print(" num_lidar_rays: ", self.num_lidar_rays)
-        print(" angles: ",self.angles)
-        print(" distances: ", self.distances)
-    
-    # Convert the sensor signal to a list of ints and floats.
-    def to_list(self):
-        sensor_data_list = []
-        sensor_data_list.append(self.encoder_counts)
-        sensor_data_list.append(self.steering)
-        sensor_data_list.append(self.num_lidar_rays)
-        for i in range(self.num_lidar_rays):
-            sensor_data_list.append(self.angles[i])
-            sensor_data_list.append(self.distances[i])
-        
-        return sensor_data_list
-            
-
 # The robot's message receiver
 class MsgReceiver:
 
@@ -272,48 +192,81 @@ class MsgReceiver:
             
         return robot_sensor_signal
 
+# Class to hold a camera sensor data. Not needed for lab 1.
+class CameraSensor:
 
-# The core robot class
-class Robot:
-
-    def __init__(self):
-        self.connected_to_hardware = False
-        self.running_trial = False
-        self.extra_logging = False
-        self.trial_start_time = 0
-        self.msg_sender = None
-        self.msg_receiver = None
-        self.camera_sensor = CameraSensor(parameters.camera_id)
-        self.data_logger = DataLogger(parameters.filename_start, parameters.data_name_list)
-        self.robot_sensor_signal = RobotSensorSignal([0, 0, 0])
-        self.camera_sensor_signal = [0,0,0,0,0,0]
-        print("New robot!")
+    # Constructor
+    def __init__(self, camera_id):
+        self.camera_id = camera_id
+        self.cap = cv2.VideoCapture(camera_id)
+        self.aruco_dict = aruco.getPredefinedDictionary(aruco.DICT_6X6_250)
+        self.parameters = aruco.DetectorParameters()
+        self.detector = aruco.ArucoDetector(self.aruco_dict, self.parameters)
         
-    # Create udp senders and receiver instances with the udp communication
-    def setup_udp_connection(self, udp_communication):
-        self.msg_sender = MsgSender(time.perf_counter(), parameters.num_robot_control_signals, udp_communication)
-        self.msg_receiver = MsgReceiver(time.perf_counter(), parameters.num_robot_sensors, udp_communication)
-        print("Reset msg_senders and receivers!")
-
-    # Stop udp senders and receiver instances with the udp communication
-    def eliminate_udp_connection(self):
-        self.msg_sender = None
-        self.msg_receiver = None
-        print("Eliminate UDP !!!")
-
-    # One iteration of the control loop to be called repeatedly
-    def control_loop(self, cmd_speed = 0, cmd_steering_angle = 0, logging_switch_on = False):
-        # Receive msg
-        if self.msg_sender != None:
-            self.robot_sensor_signal = self.msg_receiver.receive_robot_sensor_signal(self.robot_sensor_signal)
+    # Get a new pose estimate from a camera image
+    def get_signal(self, last_camera_signal):
+        camera_signal = last_camera_signal
+        ret, pose_estimate = self.get_pose_estimate()
+        if ret:
+            camera_signal = pose_estimate
         
-        # Update control signals
-        control_signal = [cmd_speed, cmd_steering_angle]
-                
-        # Send msg
-        if self.msg_receiver != None:
-            self.msg_sender.send_control_signal(control_signal)
-            
-        # Log the data
-        self.data_logger.log(logging_switch_on, time.perf_counter(), control_signal, self.robot_sensor_signal, self.camera_sensor_signal)
+        return camera_signal
+        
+    # If there is a new image, calculate a pose estimate from the fiducial tag on the robot.
+    def get_pose_estimate(self):
+        ret, frame = self.cap.read()
+        if not ret:
+            return False, []
+        
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        corners, ids, rejectedImgPoints = self.detector.detectMarkers(gray)
+        if ids is not None:
+            # Estimate pose for each detected marker
+            for i in range(len(ids)):
+                rvec, tvec, _ = aruco.estimatePoseSingleMarkers(corners[i], parameters.marker_length, parameters.camera_matrix, parameters.dist_coeffs)
+                pose_estimate = [tvec[0][0][0], tvec[0][0][1], tvec[0][0][2], rvec[0][0][0], rvec[0][0][1], rvec[0][0][2]]
+            return True, pose_estimate
+        
+        return False, []
+    
+    # Close the camera stream
+    def close(self):
+        self.cap.release()
+        cv2.destroyAllWindows()
 
+
+# A storage vessel for an instance of a robot signal
+class RobotSensorSignal:
+
+    # Constructor
+    def __init__(self, unpacked_msg):
+        self.encoder_counts = int(unpacked_msg[0])
+        self.steering = int(unpacked_msg[1])
+        self.num_lidar_rays = int(unpacked_msg[2])
+        self.angles = []
+        self.distances = []
+        for i in range(self.num_lidar_rays):
+            index = 3 + i*2
+            self.angles.append(unpacked_msg[index])
+            self.distances.append(unpacked_msg[index+1])
+    
+    # Print the robot sensor signal contents.
+    def print(self):
+        print("Robot Sensor Signal")
+        print(" encoder: ", self.encoder_counts)
+        print(" steering:" , self.steering)
+        print(" num_lidar_rays: ", self.num_lidar_rays)
+        print(" angles: ",self.angles)
+        print(" distances: ", self.distances)
+    
+    # Convert the sensor signal to a list of ints and floats.
+    def to_list(self):
+        sensor_data_list = []
+        sensor_data_list.append(self.encoder_counts)
+        sensor_data_list.append(self.steering)
+        sensor_data_list.append(self.num_lidar_rays)
+        for i in range(self.num_lidar_rays):
+            sensor_data_list.append(self.angles[i])
+            sensor_data_list.append(self.distances[i])
+        
+        return sensor_data_list
